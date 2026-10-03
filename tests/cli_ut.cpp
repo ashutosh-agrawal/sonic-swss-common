@@ -339,6 +339,43 @@ TEST(sonic_db_cli, test_cli_help)
     EXPECT_EQ(expected_output, output);
 }
 
+TEST(sonic_db_cli, test_writer_profile_argument)
+{
+    char *args[] = {
+        const_cast<char *>("sonic-db-cli"),
+        const_cast<char *>("--writer-profile"),
+        const_cast<char *>("invalid profile"),
+        const_cast<char *>("TEST_DB"),
+        const_cast<char *>("SET"),
+        const_cast<char *>("key"),
+        const_cast<char *>("value")
+    };
+
+    optind = 0;
+    testing::internal::CaptureStderr();
+    int result = sonic_db_cli(7, args);
+    string error = testing::internal::GetCapturedStderr();
+
+    EXPECT_EQ(1, result);
+    EXPECT_NE(string::npos, error.find("Redis authentication profile is invalid"));
+}
+
+TEST(sonic_db_cli, test_writer_profile_requires_value)
+{
+    char *args[] = {
+        const_cast<char *>("sonic-db-cli"),
+        const_cast<char *>("--writer-profile")
+    };
+
+    optind = 0;
+    testing::internal::CaptureStdout();
+    testing::internal::CaptureStderr();
+    int result = sonic_db_cli(2, args);
+    testing::internal::GetCapturedStderr();
+    testing::internal::GetCapturedStdout();
+    EXPECT_EQ(-1, result);
+}
+
 TEST(sonic_db_cli, test_cli_ping_cmd)
 {
     char *args[3];

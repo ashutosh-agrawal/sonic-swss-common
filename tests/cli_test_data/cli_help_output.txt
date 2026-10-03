@@ -1,4 +1,4 @@
-usage: sonic-db-cli [-h] [-s] [-j] [-n NAMESPACE] db_or_op [cmd [cmd ...]]
+usage: sonic-db-cli [-h] [-s] [-j] [-n NAMESPACE] [--writer-profile PROFILE] db_or_op [cmd [cmd ...]]
 
 SONiC DB CLI:
 
@@ -12,6 +12,8 @@ optional arguments:
   -j, --json            Print command result as JSON
   -n NAMESPACE, --namespace NAMESPACE
                         Namespace string to use asic0/asic1.../asicn
+  --writer-profile PROFILE
+                        Use an approved authenticated writer profile
 
 **sudo** needed for commands accesing a different namespace [-n], or using unixsocket connection [-s]
 

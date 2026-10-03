@@ -10,9 +10,37 @@
 using namespace swss;
 using namespace std;
 
+namespace
+{
+
+void validateTarget(
+    const string& netns,
+    const string& dbName,
+    bool useUnixSocket,
+    const RedisAuthConfig& authConfig)
+{
+    const string host = SonicDBConfig::getDbHostname(dbName, netns);
+    if (useUnixSocket && host != "redis_chassis.server")
+    {
+        authConfig.validateUnixEndpoint(SonicDBConfig::getDbSock(dbName, netns));
+    }
+    else
+    {
+        authConfig.validateTcpEndpoint(host, SonicDBConfig::getDbPort(dbName, netns));
+    }
+}
+
+void parseCliArgumentsInternal(
+    int argc,
+    char** argv,
+    Options& options,
+    string *writerProfile);
+
+}
+
 void printUsage()
 {
-    cout << "usage: sonic-db-cli [-h] [-s] [-j] [-n NAMESPACE] db_or_op [cmd [cmd ...]]" << endl;
+    cout << "usage: sonic-db-cli [-h] [-s] [-j] [-n NAMESPACE] [--writer-profile PROFILE] db_or_op [cmd [cmd ...]]" << endl;
     cout << endl;
     cout << "SONiC DB CLI:" << endl;
     cout << endl;
@@ -26,6 +54,8 @@ void printUsage()
     cout << "  -j, --json            Print command result as JSON" << endl;
     cout << "  -n NAMESPACE, --namespace NAMESPACE" << endl;
     cout << "                        Namespace string to use asic0/asic1.../asicn" << endl;
+    cout << "  --writer-profile PROFILE" << endl;
+    cout << "                        Use an approved authenticated writer profile" << endl;
     cout << endl;
     cout << "**sudo** needed for commands accesing a different namespace [-n], or using unixsocket connection [-s]" << endl;
     cout << endl;
@@ -44,6 +74,17 @@ string handleSingleOperation(
     const string& operation,
     bool useUnixSocket)
 {
+    return handleSingleOperation(
+        netns, db_name, operation, useUnixSocket, RedisAuthConfig());
+}
+
+string handleSingleOperation(
+    const string& netns,
+    const string& db_name,
+    const string& operation,
+    bool useUnixSocket,
+    const RedisAuthConfig& authConfig)
+{
     shared_ptr<DBConnector> client;
     auto host = SonicDBConfig::getDbHostname(db_name, netns);
     string message = "Could not connect to Redis at " + host + ":";
@@ -54,13 +95,13 @@ string handleSingleOperation(
         {
             auto db_socket = SonicDBConfig::getDbSock(db_name, netns);
             message += db_name + ": Connection refused";
-            client = make_shared<DBConnector>(db_id, db_socket, 0);
+            client = make_shared<DBConnector>(db_id, db_socket, 0, authConfig);
         }
         else
         {
             auto port = SonicDBConfig::getDbPort(db_name, netns);
             message += port + ": Connection refused";
-            client = make_shared<DBConnector>(db_id, host, port, 0);
+            client = make_shared<DBConnector>(db_id, host, port, 0, authConfig);
         }
     }
     catch (const exception& e)
@@ -92,13 +133,35 @@ int handleAllInstances(
     const string& operation,
     bool useUnixSocket)
 {
+    return handleAllInstances(netns, operation, useUnixSocket, RedisAuthConfig());
+}
+
+int handleAllInstances(
+    const string& netns,
+    const string& operation,
+    bool useUnixSocket,
+    const RedisAuthConfig& authConfig)
+{
     auto db_names = SonicDBConfig::getDbList(netns);
+
+    /* Reject a mixed-domain profile before any parallel operation can run. */
+    for (const auto& db_name : db_names)
+    {
+        validateTarget(netns, db_name, useUnixSocket, authConfig);
+    }
+
     // Operate All Redis Instances in Parallel
     // TODO: if one of the operations failed, it could fail quickly and not necessary to wait all other operations
     list<future<string>> responses;
     for (auto& db_name : db_names)
     {
-        future<string> response = std::async(std::launch::async, handleSingleOperation, netns, db_name, operation, useUnixSocket);
+        future<string> response = std::async(
+            std::launch::async,
+            [netns, db_name, operation, useUnixSocket, authConfig]()
+            {
+                return handleSingleOperation(
+                    netns, db_name, operation, useUnixSocket, authConfig);
+            });
         responses.push_back(std::move(response));
     }
 
@@ -137,6 +200,18 @@ int executeCommands(
     bool useUnixSocket,
     bool useJson)
 {
+    return executeCommands(
+        db_name, commands, netns, useUnixSocket, useJson, RedisAuthConfig());
+}
+
+int executeCommands(
+    const string& db_name,
+    vector<string>& commands,
+    const string& netns,
+    bool useUnixSocket,
+    bool useJson,
+    const RedisAuthConfig& authConfig)
+{
     shared_ptr<DBConnector> client = nullptr;
     try
     {
@@ -145,12 +220,12 @@ int executeCommands(
         if (useUnixSocket && host != "redis_chassis.server")
         {
             auto db_socket = SonicDBConfig::getDbSock(db_name, netns);
-            client = make_shared<DBConnector>(db_id, db_socket, 0);
+            client = make_shared<DBConnector>(db_id, db_socket, 0, authConfig);
         }
         else
         {
             auto port = SonicDBConfig::getDbPort(db_name, netns);
-            client = make_shared<DBConnector>(db_id, host, port, 0);
+            client = make_shared<DBConnector>(db_id, host, port, 0, authConfig);
         }
     }
     catch (const exception& e)
@@ -189,11 +264,20 @@ int executeCommands(
     return 0;
 }
 
-void parseCliArguments(
+namespace
+{
+
+void parseCliArgumentsInternal(
     int argc,
     char** argv,
-    Options &options)
+    Options& options,
+    string *writerProfile)
 {
+    enum
+    {
+        WRITER_PROFILE_OPTION = 256
+    };
+
     // Parse argument with getopt https://man7.org/linux/man-pages/man3/getopt.3.html
     const char* short_options = "hsjn";
     static struct option long_options[] = {
@@ -201,6 +285,7 @@ void parseCliArguments(
        {"unixsocket",  optional_argument, NULL,  's' },
        {"json",        no_argument,       NULL,  'j' },
        {"namespace",   optional_argument, NULL,  'n' },
+       {"writer-profile", required_argument, NULL, WRITER_PROFILE_OPTION },
        // The last element of the array has to be filled with zeros.
        {0,          0,       0,  0 }
     };
@@ -237,9 +322,24 @@ void parseCliArguments(
                     }
                     break;
 
+                case WRITER_PROFILE_OPTION:
+                    if (writerProfile == nullptr)
+                    {
+                        throw invalid_argument("Unknown argument:--writer-profile");
+                    }
+                    if (optarg == nullptr || *optarg == '\0')
+                    {
+                        throw invalid_argument("writer profile value is missing.");
+                    }
+                    *writerProfile = optarg;
+                    break;
+
                 default:
-                   // argv contains unknown argument
-                   throw invalid_argument("Unknown argument:" + string(argv[optind]));
+                {
+                    // getopt advances optind before reporting an incomplete or unknown option.
+                    const char *argument = (optind > 0 && optind <= argc) ? argv[optind - 1] : "";
+                    throw invalid_argument("Unknown or incomplete argument:" + string(argument));
+                }
             }
         }
         else
@@ -258,6 +358,16 @@ void parseCliArguments(
     }
 }
 
+}
+
+void parseCliArguments(
+    int argc,
+    char** argv,
+    Options &options)
+{
+    parseCliArgumentsInternal(argc, argv, options, nullptr);
+}
+
 int sonic_db_cli(
     int argc,
     char** argv,
@@ -265,9 +375,10 @@ int sonic_db_cli(
     function<void()> initializeConfig)
 {
     Options options;
+    string writerProfile;
     try
     {
-        parseCliArguments(argc, argv, options);
+        parseCliArgumentsInternal(argc, argv, options, &writerProfile);
     }
     catch (invalid_argument const& e)
     {
@@ -287,6 +398,20 @@ int sonic_db_cli(
     {
         printUsage();
         return 0;
+    }
+
+    RedisAuthConfig authConfig;
+    if (!writerProfile.empty())
+    {
+        try
+        {
+            authConfig = RedisAuthConfig::fromProfile(writerProfile);
+        }
+        catch (const RedisAuthError& e)
+        {
+            cerr << e.what() << endl;
+            return 1;
+        }
     }
 
     if (!options.m_db_or_op.empty())
@@ -312,7 +437,8 @@ int sonic_db_cli(
                 initializeConfig();
             }
 
-            return executeCommands(dbOrOperation, commands, netns, useUnixSocket, options.m_json);
+            return executeCommands(dbOrOperation, commands, netns, useUnixSocket,
+                                   options.m_json, authConfig);
         }
         else if (dbOrOperation == "PING"
                 || dbOrOperation == "SAVE"
@@ -328,7 +454,7 @@ int sonic_db_cli(
                     initializeConfig();
                 }
 
-                return handleAllInstances(netns, dbOrOperation, useUnixSocket);
+                return handleAllInstances(netns, dbOrOperation, useUnixSocket, authConfig);
             }
             catch (const exception& e)
             {

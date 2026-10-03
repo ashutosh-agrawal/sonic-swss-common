@@ -33,6 +33,8 @@ class DBInterface
 {
 public:
     void connect(int dbId, const std::string& dbName, bool retry = true);
+    void connect(int dbId, const std::string& dbName, bool retry,
+                 const RedisAuthConfig& authConfig);
     void close(const std::string& dbName);
     void close();
     int64_t del(const std::string& dbName, const std::string& key, bool blocking = false);
@@ -76,8 +78,12 @@ private:
     // In the event Redis is unavailable, close existing connections, and try again.
     void _connection_error_handler(const std::string& dbName);
     void _onetime_connect(int dbId, const std::string& dbName);
+    void _onetime_connect(int dbId, const std::string& dbName,
+                          const RedisAuthConfig& authConfig);
     // Keep reconnecting to Database 'dbId' until success
     void _persistent_connect(int dbId, const std::string& dbName);
+    void _persistent_connect(int dbId, const std::string& dbName,
+                             const RedisAuthConfig& authConfig);
 
     // Pub-sub keyspace pattern
     static constexpr const char *KEYSPACE_PATTERN = "__key*__:*";
