@@ -42,7 +42,8 @@ SWSSResult SWSSSonicV2Connector_connect_with_profile(SWSSSonicV2Connector connec
                                                      const char *profiles_file) {
     SWSSTry({
         RedisAuthConfig auth = redisAuthConfigFromProfile(profile, profiles_file);
-        ((SonicV2Connector_Native *)connector)->connect(string(db_name), retry_on != 0, auth);
+        ((SonicV2Connector_Native *)connector)->connect_with_auth(
+            string(db_name), retry_on != 0, auth);
     });
 }
 

@@ -35,7 +35,8 @@ SWSSResult SWSSConfigDBConnector_connect_with_profile(SWSSConfigDBConnector conf
                                                       const char *profiles_file) {
     SWSSTry({
         RedisAuthConfig auth = redisAuthConfigFromProfile(profile, profiles_file);
-        ((ConfigDBConnector_Native *)configDb)->connect(wait_for_init != 0, retry_on != 0, auth);
+        ((ConfigDBConnector_Native *)configDb)->connect_with_auth(
+            wait_for_init != 0, retry_on != 0, auth);
     });
 }
 

@@ -17,11 +17,11 @@ void DBInterface::set_redis_kwargs(std::string unix_socket_path, std::string hos
 
 void DBInterface::connect(int dbId, const std::string& dbName, bool retry)
 {
-    connect(dbId, dbName, retry, RedisAuthConfig());
+    connect_with_auth(dbId, dbName, retry, RedisAuthConfig());
 }
 
-void DBInterface::connect(int dbId, const std::string& dbName, bool retry,
-                          const RedisAuthConfig& authConfig)
+void DBInterface::connect_with_auth(int dbId, const std::string& dbName, bool retry,
+                                    const RedisAuthConfig& authConfig)
 {
     if (retry)
     {
@@ -322,7 +322,7 @@ void DBInterface::_connection_error_handler(const std::string& dbName)
     RedisAuthConfig authConfig = get_redis_client(dbName).getAuthConfig();
     close(dbName);
     sleep(CONNECT_RETRY_WAIT_TIME);
-    connect(dbId, dbName, true, authConfig);
+    connect_with_auth(dbId, dbName, true, authConfig);
 }
 
 void DBInterface::_onetime_connect(int dbId, const string& dbName,

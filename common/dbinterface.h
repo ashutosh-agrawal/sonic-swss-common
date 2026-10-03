@@ -33,8 +33,8 @@ class DBInterface
 {
 public:
     void connect(int dbId, const std::string& dbName, bool retry = true);
-    void connect(int dbId, const std::string& dbName, bool retry,
-                 const RedisAuthConfig& authConfig);
+    void connect_with_auth(int dbId, const std::string& dbName, bool retry,
+                           const RedisAuthConfig& authConfig);
     void close(const std::string& dbName);
     void close();
     int64_t del(const std::string& dbName, const std::string& key, bool blocking = false);

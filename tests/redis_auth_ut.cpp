@@ -755,12 +755,12 @@ TEST_F(RedisAuthTest, ReconnectAuthenticationFailureClosesConnection)
         {WRITER_CREDENTIAL, WRONG_CREDENTIAL, m_validCredentialFile});
 }
 
-TEST_F(RedisAuthTest, DBInterfaceConnectOverloadPreservesAuthentication)
+TEST_F(RedisAuthTest, DBInterfaceConnectWithAuthPreservesAuthentication)
 {
     startServer(false);
     DBInterface interface;
     interface.set_redis_kwargs("", "127.0.0.1", m_server->port());
-    interface.connect(5, "AUTH_DB", false, validAuth(true));
+    interface.connect_with_auth(5, "AUTH_DB", false, validAuth(true));
 
     DBConnector& connector = interface.get_redis_client("AUTH_DB");
     EXPECT_EQ(WRITER_USER, authenticatedUser(connector));
@@ -775,7 +775,7 @@ TEST_F(RedisAuthTest, DBInterfaceRejectsAuthenticationPolicyChangeOnOpenConnecti
     interface.connect(5, "AUTH_DB", false);
 
     EXPECT_THROW(
-        interface.connect(5, "AUTH_DB", false, validAuth(true)),
+        interface.connect_with_auth(5, "AUTH_DB", false, validAuth(true)),
         std::logic_error);
     EXPECT_EQ("default", authenticatedUser(interface.get_redis_client("AUTH_DB")));
 }
