@@ -23,6 +23,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -226,7 +227,8 @@ private:
 class DisposableRedisServer
 {
 public:
-    explicit DisposableRedisServer(bool permissiveDefault)
+    explicit DisposableRedisServer(bool permissiveDefault,
+                                   bool readOnlyDefault = false)
         : m_pid(-1)
         , m_port(reserveLoopbackPort())
     {
@@ -246,6 +248,11 @@ public:
         {
             acl << "user default on nopass ~* &* +@all\n";
         }
+        else if (readOnlyDefault)
+        {
+            acl << "user default on nopass ~* &* +@read +@connection "
+                   "+subscribe +psubscribe +unsubscribe +punsubscribe\n";
+        }
         else
         {
             acl << "user default off\n";
@@ -264,6 +271,7 @@ public:
                << "supervised no\n"
                << "save \"\"\n"
                << "appendonly no\n"
+               << "notify-keyspace-events AKE\n"
                << "databases 16\n"
                << "dir " << m_directory << "\n"
                << "dbfilename dump.rdb\n"
@@ -465,6 +473,36 @@ std::string authenticatedUser(DBConnector& connector)
     return reply.getReply<std::string>();
 }
 
+long long commandCallCount(DBConnector& connector, const std::string& command)
+{
+    RedisReply reply(&connector, "INFO commandstats", REDIS_REPLY_STRING);
+    const std::string info = reply.getReply<std::string>();
+    const std::string prefix = "cmdstat_" + command + ":calls=";
+    const std::string::size_type start = info.find(prefix);
+    if (start == std::string::npos)
+    {
+        return 0;
+    }
+
+    const std::string::size_type valueStart = start + prefix.size();
+    const std::string::size_type valueEnd = info.find(',', valueStart);
+    return std::stoll(info.substr(valueStart, valueEnd - valueStart));
+}
+
+bool waitForCommandCalls(DBConnector& connector, const std::string& command,
+                         long long minimumCalls)
+{
+    for (int attempt = 0; attempt < 5000; ++attempt)
+    {
+        if (commandCallCount(connector, command) >= minimumCalls)
+        {
+            return true;
+        }
+        usleep(1000);
+    }
+    return false;
+}
+
 template <typename Action>
 void expectRedisAuthError(Action action,
                           const std::string& expectedMessage,
@@ -526,6 +564,13 @@ protected:
         ASSERT_EQ(0, stat(m_validCredentialFile.c_str(), &st));
         EXPECT_EQ(static_cast<uid_t>(0), st.st_uid);
         EXPECT_EQ(static_cast<mode_t>(0400), st.st_mode & 0777);
+    }
+
+    void startReadOnlyServer()
+    {
+        m_server.reset(new DisposableRedisServer(false, true));
+        m_validCredentialFile = m_server->credentialFile(
+            "writer.secret", WRITER_CREDENTIAL, 0400);
     }
 
     RedisAuthConfig authFor(bool tcp,
@@ -765,6 +810,88 @@ TEST_F(RedisAuthTest, DBInterfaceConnectWithAuthPreservesAuthentication)
     DBConnector& connector = interface.get_redis_client("AUTH_DB");
     EXPECT_EQ(WRITER_USER, authenticatedUser(connector));
     EXPECT_TRUE(connector.set("db-interface-auth", "present"));
+}
+
+TEST_F(RedisAuthTest, DBInterfaceLegacyConnectDoesNotRequireServerWritePermission)
+{
+    startReadOnlyServer();
+
+    std::unique_ptr<DBConnector> writer = connect(5, true, validAuth(true));
+    ASSERT_TRUE(writer->set("read-only-default-key", "present"));
+
+    DBInterface tcpInterface;
+    tcpInterface.set_redis_kwargs("", "127.0.0.1", m_server->port());
+    ASSERT_NO_THROW(tcpInterface.connect(5, "READ_ONLY_TCP", false));
+    std::shared_ptr<std::string> tcpValue =
+        tcpInterface.get_redis_client("READ_ONLY_TCP").get("read-only-default-key");
+    ASSERT_TRUE(tcpValue);
+    EXPECT_EQ("present", *tcpValue);
+    EXPECT_THROW(
+        tcpInterface.get_redis_client("READ_ONLY_TCP").set(
+            "unauthenticated-write", "denied"),
+        std::system_error);
+
+    const long long tcpHgetCalls = commandCallCount(*writer, "hget");
+    bool tcpReachedNotificationWait = false;
+    std::thread tcpWriter(
+        [&writer, tcpHgetCalls, &tcpReachedNotificationWait]
+        {
+            tcpReachedNotificationWait =
+                waitForCommandCalls(*writer, "hget", tcpHgetCalls + 2);
+            writer->hset("blocking-tcp", "field", "arrived");
+        });
+    std::shared_ptr<std::string> blockingTcpValue;
+    try
+    {
+        blockingTcpValue = tcpInterface.get(
+            "READ_ONLY_TCP", "blocking-tcp", "field", true);
+    }
+    catch (...)
+    {
+        tcpWriter.join();
+        throw;
+    }
+    tcpWriter.join();
+    EXPECT_TRUE(tcpReachedNotificationWait);
+    ASSERT_TRUE(blockingTcpValue);
+    EXPECT_EQ("arrived", *blockingTcpValue);
+
+    DBInterface unixInterface;
+    unixInterface.set_redis_kwargs(m_server->socketPath(), "", 0);
+    ASSERT_NO_THROW(unixInterface.connect(5, "READ_ONLY_UNIX", false));
+    std::shared_ptr<std::string> unixValue =
+        unixInterface.get_redis_client("READ_ONLY_UNIX").get("read-only-default-key");
+    ASSERT_TRUE(unixValue);
+    EXPECT_EQ("present", *unixValue);
+    EXPECT_THROW(
+        unixInterface.get_redis_client("READ_ONLY_UNIX").set(
+            "unauthenticated-write", "denied"),
+        std::system_error);
+
+    const long long unixHgetCalls = commandCallCount(*writer, "hget");
+    bool unixReachedNotificationWait = false;
+    std::thread unixWriter(
+        [&writer, unixHgetCalls, &unixReachedNotificationWait]
+        {
+            unixReachedNotificationWait =
+                waitForCommandCalls(*writer, "hget", unixHgetCalls + 2);
+            writer->hset("blocking-unix", "field", "arrived");
+        });
+    std::shared_ptr<std::string> blockingUnixValue;
+    try
+    {
+        blockingUnixValue = unixInterface.get(
+            "READ_ONLY_UNIX", "blocking-unix", "field", true);
+    }
+    catch (...)
+    {
+        unixWriter.join();
+        throw;
+    }
+    unixWriter.join();
+    EXPECT_TRUE(unixReachedNotificationWait);
+    ASSERT_TRUE(blockingUnixValue);
+    EXPECT_EQ("arrived", *blockingUnixValue);
 }
 
 TEST_F(RedisAuthTest, DBInterfaceRejectsAuthenticationPolicyChangeOnOpenConnection)
