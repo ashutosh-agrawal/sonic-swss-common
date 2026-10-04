@@ -34,16 +34,37 @@ int executeCommands(
     bool isTcpConn,
     bool useJson = false);
 
+int executeCommands(
+    const std::string& db_name,
+    std::vector<std::string>& commands,
+    const std::string& netns,
+    bool isTcpConn,
+    bool useJson,
+    const swss::RedisAuthConfig& authConfig);
+
 std::string handleSingleOperation(
     const std::string& netns,
     const std::string& db_name,
     const std::string& operation,
     bool isTcpConn);
 
+std::string handleSingleOperation(
+    const std::string& netns,
+    const std::string& db_name,
+    const std::string& operation,
+    bool isTcpConn,
+    const swss::RedisAuthConfig& authConfig);
+
 int handleAllInstances(
     const std::string& netns,
     const std::string& operation,
     bool isTcpConn);
+
+int handleAllInstances(
+    const std::string& netns,
+    const std::string& operation,
+    bool isTcpConn,
+    const swss::RedisAuthConfig& authConfig);
 
 void parseCliArguments(
     int argc,
