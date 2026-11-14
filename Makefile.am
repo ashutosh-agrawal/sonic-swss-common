@@ -14,7 +14,6 @@ SWIG_FLAG += -DSWIGWORDSIZE64
 endif
 
 CLEANFILES =
-EXTRA_DIST =
 
 include common/Makefile.am
 include pyext/Makefile.am
@@ -23,3 +22,7 @@ include tests/Makefile.am
 
 
 ACLOCAL_AMFLAGS = -I m4
+
+EXTRA_DIST = go.mod goext/redisconn/dial.go goext/redisconn/dial_test.go \
+             goext/redisconn/gcov.go goext/redisconn/gcov_test.go
+SWIG_SOURCES += common/redisrdb.h
