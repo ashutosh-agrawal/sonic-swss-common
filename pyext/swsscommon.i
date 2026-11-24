@@ -26,7 +26,6 @@
 #define PyExc_TimeoutError PyExc_IOError
 #define PyExc_ConnectionError PyExc_IOError
 #endif
-#include "redisrdb.h"
 #include "dbinterface.h"
 #include "sonicv2connector.h"
 #include "pubsub.h"
@@ -302,7 +301,6 @@ T castSelectableObj(swss::Selectable *temp)
 }
 %include "redissocket.h"
 #endif
-%include "redisrdb.h"
 #ifdef ENABLE_YANG_MODULES
 %include "cfg_schema.h"
 // DefaultValueHelper exposes libyang schema-node pointers (lys_node* /
