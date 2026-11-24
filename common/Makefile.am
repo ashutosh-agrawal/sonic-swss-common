@@ -144,3 +144,5 @@ common_swssloglevel_LDADD = common/libswsscommon.la $(CODE_COVERAGE_LIBS)
 common_swssloglevel_LDFLAGS = -Wl,-z,now $(LDFLAGS)
 
 common_libswsscommon_la_SOURCES += common/redissocket.cpp common/redissocket.h
+common_libswsscommon_la_SOURCES += common/c-api/redissocket.cpp common/c-api/redissocket.h
+common_libswsscommon_la_SOURCES += common/redissocket_interruptible.cpp common/c-api/internal/redissocket.h
